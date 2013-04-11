@@ -1,0 +1,904 @@
+
+--- a/kmousetool/kmousetool.cpp
++++ b/kmousetool/kmousetool.cpp
+@@ -19,32 +19,46 @@
+  *                                                                         *
+  ***************************************************************************/
+ 
+-#include "kmousetool.h"
+-#include "Xmd_kmousetool.h"
+-#include "kmousetool.moc"
+-#include "mtstroke.h"
+-#include <kconfig.h>
++#include <X11/Xmd.h>
+ #include <X11/Intrinsic.h>     /* Intrinsics Definitions*/
+ #include <X11/StringDefs.h>    /* Standard Name-String definitions*/
+ #include <X11/extensions/xtestext1.h>    /* Standard Name-String definitions*/
+ #include <X11/extensions/XTest.h>    /* Standard Name-String definitions*/
++#include <X11/keysymdef.h>
++
++#include "mtstroke.h"
+ #include <fixx11h.h>
+-#include <kdialog.h>
+-#include <klocale.h>
+-#include <QtGui/QPushButton>
++#include <Phonon/MediaObject>
++#include <netwm.h>
++#include <iostream>
++
+ #include <QtCore/QPoint>
+ #include <QtCore/qnamespace.h>
++#include <QtCore/QAbstractEventDispatcher>
+ #include <QtGui/QPixmap>
+ #include <QtCore/QTimerEvent>
+ #include <QtGui/QDesktopWidget>
+-#include <kmessagebox.h>
+-#include <kstandarddirs.h>
+ #include <QtGui/QSound>
+-#include <kglobalsettings.h>
+-#include <kdebug.h>
+ #include <QtGui/QLayout>
+ #include <QtGui/QLineEdit>
+ #include <QtGui/QCheckBox>
++#include <QApplication>
++#include <QtDBus>
++#include <QComboBox>
++#include <QStackedWidget>
++#include <QX11Info>
++#include <QtGui/QPushButton>
++
++#include <kdebug.h>
++#include "kmousetool.h"
++#include "kmousetool.moc"
++#include <kconfig.h>
++#include <kdialog.h>
++#include <klocale.h>
++#include <kmessagebox.h>
++#include <kstandarddirs.h>
++#include <kglobalsettings.h>
++#include <kdebug.h>
+ #include <ksystemtrayicon.h>
+ #include <kicon.h>
+ #include <kiconloader.h>
+@@ -53,13 +67,10 @@
+ #include <knuminput.h>
+ #include <kmenu.h>
+ #include <kaboutapplicationdialog.h>
+-#include <Phonon/MediaObject>
+-#include <netwm.h>
+ #include <kapplication.h>
+-#include <iostream>
+-#include <QtCore/QAbstractEventDispatcher>
+ #include <ktoolinvocation.h>
+ #include <kglobal.h>
++#include <kmodifierkeyinfo.h> //for kmodifier keys
+ 
+ //using namespace Arts;
+ 
+@@ -181,26 +192,41 @@ void KMouseTool::timerEvent( QTimerEvent * )
+ 
+ 		// if we're dragging the mouse, ignore stroke type
+ 		if (mouse_is_down) {
++
++                        if(implement()==false) {
+ 			normalClick();
+-			return;
+
+                }
++		else
++                	return;
++                }
+ 
+ 		if (!strokesEnabled) {
++                        if(implement()==false) {
+ 			normalClick();
+-			return;
+                }
++                else
++                	return;
++                }
+ 		if (strokeType == MTStroke::DontClick)
+ 			return;
+ 		if (strokeType==MTStroke::bumped_mouse)
+ 			return;
+ 
+-		if (strokeType==MTStroke::RightClick || strokeType==MTStroke::UpperRightStroke)
++		if (strokeType==MTStroke::RightClick || strokeType==MTStroke::UpperRightStroke) {
++                        if(implement()==false) {
+ 			RightClick();
+-		else if (strokeType==MTStroke::DoubleClick || strokeType==MTStroke::LowerLeftStroke)
+-			DoubleClick();
+-		else
+-			normalClick();
+                }
++                }
++                else if (strokeType==MTStroke::DoubleClick || strokeType==MTStroke::LowerLeftStroke) {
++			if(implement()==false) {
++                        DoubleClick();
++                }
++                }
++                else
++                        if(implement()==false) {   		
++                  	normalClick();
++        }
++        }
+ }
+ 
+ void KMouseTool::normalClick()
+@@ -244,6 +270,7 @@ KMouseTool::KMouseTool(QWidget *parent, const char *name) :
+ 	init_vars();
+ 	resetSettings();
+ 
++        connect(DisableKey, SIGNAL(activated( int )), this, SLOT(showItemIndex()));
+ 	connect(movementEdit, SIGNAL(valueChanged(int)), this, SLOT(settingsChanged()));
+ 	connect(dwellTimeEdit, SIGNAL(valueChanged(int)), this, SLOT(settingsChanged()));
+ 	connect(dragTimeEdit, SIGNAL(valueChanged(int)), this, SLOT(settingsChanged()));
+@@ -251,8 +278,8 @@ KMouseTool::KMouseTool(QWidget *parent, const char *name) :
+ 	connect(cbStroke, SIGNAL(stateChanged(int)), this, SLOT(settingsChanged()));
+ 	connect(cbClick, SIGNAL(stateChanged(int)), this, SLOT(settingsChanged()));
+ 	connect(cbStart, SIGNAL(stateChanged(int)), this, SLOT(settingsChanged()));
+-
+        connect(buttonStartStop, SIGNAL(clicked()), this, SLOT(startStopSelected()));
+ 	buttonDefault->setGuiItem(KStandardGuiItem::defaults());
+ 	connect(buttonDefault, SIGNAL(clicked()), this, SLOT(defaultSelected()));
+ 	connect(buttonReset, SIGNAL(clicked()), this, SLOT(resetSelected()));
+@@ -264,7 +291,8 @@ KMouseTool::KMouseTool(QWidget *parent, const char *name) :
+ 	connect(buttonClose, SIGNAL(clicked()), this, SLOT(closeSelected()));
+ 	buttonQuit->setGuiItem(KStandardGuiItem::quit());
+ 	connect(buttonQuit, SIGNAL(clicked()), this, SLOT(quitSelected()));
+-
++       
++       
+ 	// When we first start, it's nice to not click immediately.
+ 	// So, tell MT we're just starting
+ 	mousetool_just_started = true;
+@@ -413,7 +441,7 @@ void KMouseTool::setAutostart (bool start)
+ 	if (fi.exists()) 			// if it exists, delete it
+ 		cmd = QString(QLatin1String( "rm -f %1" )).arg(sym);
+ 	}
+	system	(cmd.toAscii());
+ }
+ 
+ bool KMouseTool::applySettings()
+@@ -445,6 +473,25 @@ bool KMouseTool::applySettings()
+ 	return true;
+ }
+ 
++
++int KMouseTool::showItemIndex() {
++        return  DisableKey->currentIndex();
++}
++
++bool KMouseTool::implement()
++{
++        KModifierKeyInfo info;
++        if(KMouseTool::showItemIndex()==1 && info.isKeyPressed(Qt::Key_Control)==true)
++            return true;
++        if(KMouseTool::showItemIndex()==2 && info.isKeyPressed(Qt::Key_Alt)==true)
++            return true;
++        if(KMouseTool::showItemIndex()==3 && info.isKeyPressed(Qt::Key_Shift)==true)
++            return true;
++        if(KMouseTool::showItemIndex()==4 && info.isKeyPressed(Qt::Key_NumLock)==true)
++            return true;
++        else
++        return false;
++}
+ // Save options to kmousetoolrc file
+ void KMouseTool::loadOptions()
+ {
+@@ -524,7 +571,6 @@ bool KMouseTool::defaultSettings()
+ }
+ 
+ /******** SLOTS **********/
+-
+ // Value or state changed
+ void KMouseTool::settingsChanged ()
+ {
+diff --git a/kmousetool/kmousetool.h b/kmousetool/kmousetool.h
+index 245d3ef..2255c70 100644
+--- a/kmousetool/kmousetool.h
++++ b/kmousetool/kmousetool.h
+@@ -26,6 +26,8 @@
+ #include <QtGui/QLabel>
+ #include <QtCore/QTimerEvent>
+ #include <QtGui/QWidget>
++#include <QComboBox>
++ #include <QStackedWidget>
+ 
+ #include "version.h"
+ 
+@@ -79,9 +81,8 @@ private:
+ 	QString	mSoundFileName;
+ 	Phonon::MediaObject *mplayer;
+ 	KMouseToolTray *trayIcon;
+
+	KAboutApplicationDialog *aboutDlg;
++        
+ 	/**
+ 	 * Initialize all variables
+ 	 */
+@@ -144,7 +145,7 @@ private:
+ 
+ 	bool isAutostart();
+ 	void setAutostart (bool start);
+-
++                               
+ public slots:
+ 	/**
+ 	 * This slot is called whenever a value in the settings window was changed.
+@@ -164,6 +165,7 @@ public slots:
+ 
+ 	void aboutSelected();
+ 	void configureSelected();
++        int showItemIndex();
+ 
+ public:
+ 	/**
+@@ -189,6 +191,9 @@ public:
+ 
+ 	/** destructor */
+ 	~KMouseTool();
++        bool implement();
++        bool isKeyPressed(Qt::Key key);
++        
+ };
+ 
+ class KMouseToolTray : public KStatusNotifierItem {
+@@ -196,13 +201,14 @@ class KMouseToolTray : public KStatusNotifierItem {
+ public:
+ 	explicit KMouseToolTray (QWidget *parent=0);
+ 	~KMouseToolTray();
+-
++        
+ 	void updateStartStopText (bool mousetool_is_running);
+ signals:
+ 	void startStopSelected();
+ 	void configureSelected();
+ 	void aboutSelected();
+ 	void helpSelected();
++        
+ private:
+         QAction* startStopAct;
+ 
+diff --git a/kmousetool/kmousetoolui.ui b/kmousetool/kmousetoolui.ui
+old mode 100644
+new mode 100755
+index e0e2ec3..5944e93
+--- a/kmousetool/kmousetoolui.ui
++++ b/kmousetool/kmousetoolui.ui
+@@ -1,69 +1,116 @@
+-<ui version="4.0" >
++<?xml version="1.0" encoding="UTF-8"?>
++<ui version="4.0">
++ <author>Akshay Ratan</author>
+  <class>KMouseToolUI</class>
+- <widget class="QWidget" name="KMouseToolUI" >
+-  <property name="geometry" >
++ <widget class="QWidget" name="KMouseToolUI">
++  <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+-    <width>608</width>
+-    <height>478</height>
++    <width>572</width>
++    <height>556</height>
+    </rect>
+   </property>
+-  <property name="windowTitle" >
++  <property name="windowTitle">
+    <string>KMouseTool</string>
+   </property>
+-  <layout class="QGridLayout" >
+-   <property name="margin" >
++  <layout class="QGridLayout">
++   <property name="margin">
+     <number>11</number>
+    </property>
+-   <property name="spacing" >
++   <property name="spacing">
+     <number>6</number>
+    </property>
+-   <item row="2" column="0" >
+-    <spacer>
+-     <property name="orientation" >
+-      <enum>Qt::Vertical</enum>
+-     </property>
+-     <property name="sizeType" >
+-      <enum>QSizePolicy::Expanding</enum>
++   <item row="0" column="0">
++    <layout class="QHBoxLayout">
++     <property name="spacing">
++      <number>6</number>
+      </property>
+-     <property name="sizeHint" stdset="0" >
+-      <size>
+-       <width>20</width>
+-       <height>30</height>
+-      </size>
++     <property name="margin">
++      <number>0</number>
+      </property>
+-    </spacer>
++     <item>
++      <widget class="QLabel" name="textLabel1">
++       <property name="sizePolicy">
++        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
++         <horstretch>0</horstretch>
++         <verstretch>0</verstretch>
++        </sizepolicy>
++       </property>
++       <property name="text">
++        <string>KMouseTool will run as a background application after you close this dialog. To change the settings again, restart KMouseTool or use the KDE system tray.</string>
++       </property>
++       <property name="scaledContents">
++        <bool>false</bool>
++       </property>
++       <property name="alignment">
++        <set>Qt::AlignJustify|Qt::AlignVCenter</set>
++       </property>
++       <property name="wordWrap">
++        <bool>true</bool>
++       </property>
++      </widget>
++     </item>
++     <item>
++      <spacer>
++       <property name="orientation">
++        <enum>Qt::Horizontal</enum>
++       </property>
++       <property name="sizeType">
++        <enum>QSizePolicy::Fixed</enum>
++       </property>
++       <property name="sizeHint" stdset="0">
++        <size>
++         <width>8</width>
++         <height>8</height>
++        </size>
++       </property>
++      </spacer>
++     </item>
++     <item>
++      <widget class="KPushButton" name="buttonStartStop">
++       <property name="sizePolicy">
++        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
++         <horstretch>0</horstretch>
++         <verstretch>0</verstretch>
++        </sizepolicy>
++       </property>
++       <property name="text">
++        <string>&amp;Start</string>
++       </property>
++      </widget>
++     </item>
++    </layout>
+    </item>
+-   <item row="1" column="0" >
+-    <widget class="QGroupBox" name="groupBox1" >
+-     <property name="title" >
++   <item row="1" column="0">
++    <widget class="QGroupBox" name="groupBox1">
++     <property name="title">
+       <string>Settings</string>
+      </property>
+-     <layout class="QGridLayout" >
+-      <property name="margin" >
++     <layout class="QGridLayout">
++      <property name="margin">
+        <number>11</number>
+       </property>
+-      <property name="spacing" >
++      <property name="spacing">
+        <number>6</number>
+       </property>
+-      <item row="3" column="0" >
+-       <layout class="QGridLayout" >
+-        <property name="margin" >
++      <item row="3" column="0">
++       <layout class="QGridLayout">
++        <property name="margin">
+          <number>0</number>
+         </property>
+-        <property name="spacing" >
++        <property name="spacing">
+          <number>6</number>
+         </property>
+-        <item row="0" column="0" >
++        <item row="0" column="0">
+          <spacer>
+-          <property name="orientation" >
++          <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+-          <property name="sizeType" >
++          <property name="sizeType">
+            <enum>QSizePolicy::Fixed</enum>
+           </property>
+-          <property name="sizeHint" stdset="0" >
++          <property name="sizeHint" stdset="0">
+            <size>
+             <width>16</width>
+             <height>20</height>
+@@ -71,152 +118,152 @@
+           </property>
+          </spacer>
+         </item>
+-        <item row="0" column="1" >
+-         <widget class="QLabel" name="dragTimeLabel" >
+-          <property name="sizePolicy" >
+-           <sizepolicy vsizetype="Fixed" hsizetype="Preferred" >
++        <item row="0" column="1">
++         <widget class="QLabel" name="dragTimeLabel">
++          <property name="sizePolicy">
++           <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+-          <property name="text" >
++          <property name="text">
+            <string>Drag t&amp;ime (1/10 sec):</string>
+           </property>
+-          <property name="buddy" >
++          <property name="buddy">
+            <cstring>dragTimeEdit</cstring>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+-      <item row="3" column="1" >
+-       <widget class="KIntSpinBox" name="dragTimeEdit" >
+-        <property name="sizePolicy" >
+-         <sizepolicy vsizetype="Fixed" hsizetype="Minimum" >
++      <item row="3" column="1">
++       <widget class="KIntSpinBox" name="dragTimeEdit">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+-        <property name="minimum" >
++        <property name="minimum">
+          <number>1</number>
+         </property>
+-        <property name="maximum" >
++        <property name="maximum">
+          <number>40</number>
+         </property>
+-        <property name="value" >
++        <property name="value">
+          <number>3</number>
+         </property>
+        </widget>
+       </item>
+-      <item row="1" column="1" >
+-       <widget class="KIntSpinBox" name="dwellTimeEdit" >
+-        <property name="sizePolicy" >
+-         <sizepolicy vsizetype="Fixed" hsizetype="Minimum" >
++      <item row="1" column="1">
++       <widget class="KIntSpinBox" name="dwellTimeEdit">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+-        <property name="minimum" >
++        <property name="minimum">
+          <number>1</number>
+         </property>
+-        <property name="maximum" >
++        <property name="maximum">
+          <number>40</number>
+         </property>
+-        <property name="value" >
++        <property name="value">
+          <number>5</number>
+         </property>
+        </widget>
+       </item>
+-      <item row="0" column="0" >
+-       <widget class="QLabel" name="movementLabel" >
+-        <property name="text" >
++      <item row="0" column="0">
++       <widget class="QLabel" name="movementLabel">
++        <property name="text">
+          <string>&amp;Minimum movement:</string>
+         </property>
+-        <property name="buddy" >
++        <property name="buddy">
+          <cstring>movementEdit</cstring>
+         </property>
+        </widget>
+       </item>
+-      <item row="0" column="1" >
+-       <widget class="KIntSpinBox" name="movementEdit" >
+-        <property name="sizePolicy" >
+-         <sizepolicy vsizetype="Fixed" hsizetype="Minimum" >
++      <item row="0" column="1">
++       <widget class="KIntSpinBox" name="movementEdit">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+-        <property name="minimum" >
++        <property name="minimum">
+          <number>1</number>
+         </property>
+-        <property name="maximum" >
++        <property name="maximum">
+          <number>40</number>
+         </property>
+        </widget>
+       </item>
+-      <item row="4" column="0" colspan="2" >
+-       <widget class="QCheckBox" name="cbStroke" >
+-        <property name="text" >
++      <item row="4" column="0" colspan="2">
++       <widget class="QCheckBox" name="cbStroke">
++        <property name="text">
+          <string>&amp;Enable strokes</string>
+         </property>
+        </widget>
+       </item>
+-      <item row="1" column="0" >
+-       <widget class="QLabel" name="dwellTimeLabel" >
+-        <property name="sizePolicy" >
+-         <sizepolicy vsizetype="Fixed" hsizetype="Preferred" >
++      <item row="1" column="0">
++       <widget class="QLabel" name="dwellTimeLabel">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+-        <property name="text" >
++        <property name="text">
+          <string>D&amp;well time (1/10 sec):</string>
+         </property>
+-        <property name="buddy" >
++        <property name="buddy">
+          <cstring>dwellTimeEdit</cstring>
+         </property>
+        </widget>
+       </item>
+-      <item row="2" column="0" colspan="2" >
+-       <widget class="QCheckBox" name="cbDrag" >
+-        <property name="text" >
++      <item row="2" column="0" colspan="2">
++       <widget class="QCheckBox" name="cbDrag">
++        <property name="text">
+          <string>Smar&amp;t drag</string>
+         </property>
+-        <property name="checked" >
++        <property name="checked">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+-      <item row="7" column="0" colspan="2" >
+-       <layout class="QHBoxLayout" >
+-        <property name="spacing" >
++      <item row="7" column="0" colspan="2">
++       <layout class="QHBoxLayout">
++        <property name="spacing">
+          <number>6</number>
+         </property>
+-        <property name="margin" >
++        <property name="margin">
+          <number>0</number>
+         </property>
+         <item>
+-         <widget class="KPushButton" name="buttonDefault" >
+-          <property name="text" >
++         <widget class="KPushButton" name="buttonDefault">
++          <property name="text">
+            <string>&amp;Defaults</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+-         <widget class="KPushButton" name="buttonReset" >
+-          <property name="text" >
++         <widget class="KPushButton" name="buttonReset">
++          <property name="text">
+            <string>&amp;Reset</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer>
+-          <property name="orientation" >
++          <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+-          <property name="sizeType" >
++          <property name="sizeType">
+            <enum>QSizePolicy::Expanding</enum>
+           </property>
+-          <property name="sizeHint" stdset="0" >
++          <property name="sizeHint" stdset="0">
+            <size>
+             <width>31</width>
+             <height>20</height>
+@@ -225,24 +272,24 @@
+          </spacer>
+         </item>
+         <item>
+-         <widget class="KPushButton" name="buttonApply" >
+-          <property name="text" >
++         <widget class="KPushButton" name="buttonApply">
++          <property name="text">
+            <string>&amp;Apply</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+-      <item row="6" column="0" colspan="2" >
+-       <widget class="QCheckBox" name="cbStart" >
+-        <property name="text" >
++      <item row="6" column="0" colspan="2">
++       <widget class="QCheckBox" name="cbStart">
++        <property name="text">
+          <string>Start with &amp;KDE</string>
+         </property>
+        </widget>
+       </item>
+-      <item row="5" column="0" colspan="2" >
+-       <widget class="QCheckBox" name="cbClick" >
+-        <property name="text" >
++      <item row="5" column="0" colspan="2">
++       <widget class="QCheckBox" name="cbClick">
++        <property name="text">
+          <string>A&amp;udible click</string>
+         </property>
+        </widget>
+@@ -250,91 +297,86 @@
+      </layout>
+     </widget>
+    </item>
+-   <item row="0" column="0" >
+-    <layout class="QHBoxLayout" >
+-     <property name="spacing" >
+-      <number>6</number>
++   <item row="2" column="0">
++    <widget class="QComboBox" name="DisableKey">
++     <property name="toolTip">
++      <string>&lt;!DOCTYPE HTML PUBLIC &quot;-//W3C//DTD HTML 4.0//EN&quot; &quot;http://www.w3.org/TR/REC-html40/strict.dtd&quot;&gt;
++&lt;html&gt;&lt;head&gt;&lt;meta name=&quot;qrichtext&quot; content=&quot;1&quot; /&gt;&lt;style type=&quot;text/css&quot;&gt;
++p, li { white-space: pre-wrap; }
++&lt;/style&gt;&lt;/head&gt;&lt;body style=&quot; font-family:'Ubuntu'; font-size:11pt; font-weight:400; font-style:normal;&quot;&gt;
++&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Select the temporary disable key&lt;/span&gt;&lt;/p&gt;
++&lt;p style=&quot;-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      </property>
+-     <property name="margin" >
+-      <number>0</number>
++     <property name="whatsThis">
++      <string>Select the temporary disable key</string>
+      </property>
+      <item>
+-      <widget class="QLabel" name="textLabel1" >
+-       <property name="sizePolicy" >
+-        <sizepolicy vsizetype="Preferred" hsizetype="Expanding" >
+-         <horstretch>0</horstretch>
+-         <verstretch>0</verstretch>
+-        </sizepolicy>
+-       </property>
+-       <property name="text" >
+-        <string>KMouseTool will run as a background application after you close this dialog. To change the settings again, restart KMouseTool or use the KDE system tray.</string>
+-       </property>
+-       <property name="scaledContents" >
+-        <bool>false</bool>
+-       </property>
+-       <property name="alignment" >
+-        <set>Qt::AlignJustify|Qt::AlignVCenter</set>
+-       </property>
+-       <property name="wordWrap" >
+-        <bool>true</bool>
+-       </property>
+-      </widget>
++      <property name="text">
++       <string>NONE</string>
++      </property>
+      </item>
+      <item>
+-      <spacer>
+-       <property name="orientation" >
+-        <enum>Qt::Horizontal</enum>
+-       </property>
+-       <property name="sizeType" >
+-        <enum>QSizePolicy::Fixed</enum>
+-       </property>
+-       <property name="sizeHint" stdset="0" >
+-        <size>
+-         <width>8</width>
+-         <height>8</height>
+-        </size>
+-       </property>
+-      </spacer>
++      <property name="text">
++       <string>CTRL</string>
++      </property>
+      </item>
+      <item>
+-      <widget class="KPushButton" name="buttonStartStop" >
+-       <property name="sizePolicy" >
+-        <sizepolicy vsizetype="Fixed" hsizetype="Fixed" >
+-         <horstretch>0</horstretch>
+-         <verstretch>0</verstretch>
+-        </sizepolicy>
+-       </property>
+-       <property name="text" >
+-        <string>&amp;Start</string>
+-       </property>
+-      </widget>
++      <property name="text">
++       <string>ALT</string>
++      </property>
+      </item>
+-    </layout>
++     <item>
++      <property name="text">
++       <string>SHIFT</string>
++      </property>
++     </item>
++     <item>
++      <property name="text">
++       <string>NUM</string>
++      </property>
++     </item>
++    </widget>
++   </item>
++   <item row="3" column="0">
++    <spacer>
++     <property name="orientation">
++      <enum>Qt::Vertical</enum>
++     </property>
++     <property name="sizeType">
++      <enum>QSizePolicy::Expanding</enum>
++     </property>
++     <property name="sizeHint" stdset="0">
++      <size>
++       <width>20</width>
++       <height>30</height>
++      </size>
++     </property>
++    </spacer>
+    </item>
+-   <item row="3" column="0" >
+-    <layout class="QHBoxLayout" >
+-     <property name="spacing" >
++   <item row="4" column="0">
++    <layout class="QHBoxLayout">
++     <property name="spacing">
+       <number>6</number>
+      </property>
+-     <property name="margin" >
++     <property name="margin">
+       <number>0</number>
+      </property>
+      <item>
+-      <widget class="KPushButton" name="buttonHelp" >
+-       <property name="text" >
++      <widget class="KPushButton" name="buttonHelp">
++       <property name="text">
+         <string>&amp;Help</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer>
+-       <property name="orientation" >
++       <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+-       <property name="sizeType" >
++       <property name="sizeType">
+         <enum>QSizePolicy::Expanding</enum>
+        </property>
+-       <property name="sizeHint" stdset="0" >
++       <property name="sizeHint" stdset="0">
+         <size>
+          <width>241</width>
+          <height>20</height>
+@@ -343,15 +385,15 @@
+       </spacer>
+      </item>
+      <item>
+-      <widget class="KPushButton" name="buttonClose" >
+-       <property name="text" >
++      <widget class="KPushButton" name="buttonClose">
++       <property name="text">
+         <string>&amp;Close</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+-      <widget class="KPushButton" name="buttonQuit" >
+-       <property name="text" >
++      <widget class="KPushButton" name="buttonQuit">
++       <property name="text">
+         <string>&amp;Quit</string>
+        </property>
+       </widget>
+@@ -360,21 +402,21 @@
+    </item>
+   </layout>
+  </widget>
+-  <customwidgets>
+-  <customwidget>
+-   <class>KIntSpinBox</class>
+-   <extends>QSpinBox</extends>
+-   <header>knuminput.h</header>
+-  </customwidget>
++ <customwidgets>
+   <customwidget>
+    <class>KPushButton</class>
+    <extends>QPushButton</extends>
+    <header>kpushbutton.h</header>
+   </customwidget>
++  <customwidget>
++   <class>KIntSpinBox</class>
++   <extends>QSpinBox</extends>
++   <header>knuminput.h</header>
++  </customwidget>
+  </customwidgets>
+  <includes>
+-  <include location="global" >knuminput.h</include>
+-  <include location="global" >kpushbutton.h</include>
++  <include location="global">knuminput.h</include>
++  <include location="global">kpushbutton.h</include>
+  </includes>
+  <resources/>
+  <connections>
+@@ -384,13 +426,13 @@
+    <receiver>dragTimeLabel</receiver>
+    <slot>setEnabled(bool)</slot>
+    <hints>
+-    <hint type="sourcelabel" >
+-     <x>20</x>
+-     <y>20</y>
++    <hint type="sourcelabel">
++     <x>44</x>
++     <y>186</y>
+     </hint>
+-    <hint type="destinationlabel" >
+-     <x>20</x>
+-     <y>20</y>
++    <hint type="destinationlabel">
++     <x>67</x>
++     <y>215</y>
+     </hint>
+    </hints>
+   </connection>
+@@ -400,15 +442,18 @@
+    <receiver>dragTimeEdit</receiver>
+    <slot>setEnabled(bool)</slot>
+    <hints>
+-    <hint type="sourcelabel" >
+-     <x>20</x>
+-     <y>20</y>
++    <hint type="sourcelabel">
++     <x>44</x>
++     <y>186</y>
+     </hint>
+-    <hint type="destinationlabel" >
+-     <x>20</x>
+-     <y>20</y>
++    <hint type="destinationlabel">
++     <x>212</x>
++     <y>215</y>
+     </hint>
+    </hints>
+   </connection>
+  </connections>
++ <slots>
++  <slot>setCurrentIndex(int)</slot>
++ </slots>
+ </ui>

@@ -1,0 +1,75 @@
+diff --git a/kmousetool/kmousetool.cpp b/kmousetool/kmousetool.cpp
+index ead190e..b1b6fb2 100644
+--- a/kmousetool/kmousetool.cpp
++++ b/kmousetool/kmousetool.cpp
+@@ -19,32 +19,46 @@
+  *                                                                         *
+  ***************************************************************************/
+ 
+-#include "kmousetool.h"
+-#include "Xmd_kmousetool.h"
+-#include "kmousetool.moc"
+-#include "mtstroke.h"
+-#include <kconfig.h>
++#include <X11/Xmd.h>
+ #include <X11/Intrinsic.h>     /* Intrinsics Definitions*/
+ #include <X11/StringDefs.h>    /* Standard Name-String definitions*/
+ #include <X11/extensions/xtestext1.h>    /* Standard Name-String definitions*/
+ #include <X11/extensions/XTest.h>    /* Standard Name-String definitions*/
++#include <X11/keysymdef.h>
++
++#include "mtstroke.h"
+ #include <fixx11h.h>
+-#include <kdialog.h>
+-#include <klocale.h>
+-#include <QtGui/QPushButton>
++#include <Phonon/MediaObject>
++#include <netwm.h>
++#include <iostream>
++
+ #include <QtCore/QPoint>
+ #include <QtCore/qnamespace.h>
++#include <QtCore/QAbstractEventDispatcher>
+ #include <QtGui/QPixmap>
+ #include <QtCore/QTimerEvent>
+ #include <QtGui/QDesktopWidget>
+-#include <kmessagebox.h>
+-#include <kstandarddirs.h>
+ #include <QtGui/QSound>
+-#include <kglobalsettings.h>
+-#include <kdebug.h>
+ #include <QtGui/QLayout>
+ #include <QtGui/QLineEdit>
+ #include <QtGui/QCheckBox>
++#include <QApplication>
++#include <QtDBus>
++#include <QComboBox>
++#include <QStackedWidget>
++#include <QX11Info>
++#include <QtGui/QPushButton>
++
++#include <kdebug.h>
++#include "kmousetool.h"
++#include "kmousetool.moc"
++#include <kconfig.h>
++#include <kdialog.h>
++#include <klocale.h>
++#include <kmessagebox.h>
++#include <kstandarddirs.h>
++#include <kglobalsettings.h>
++#include <kdebug.h>
+ #include <ksystemtrayicon.h>
+ #include <kicon.h>
+ #include <kiconloader.h>
+@@ -53,13 +67,10 @@
+ #include <knuminput.h>
+ #include <kmenu.h>
+ #include <kaboutapplicationdialog.h>
+-#include <Phonon/MediaObject>
+-#include <netwm.h>
+ #include <kapplication.h>
+-#include <iostream>
+-#include <QtCore/QAbstractEventDispatcher>
+ #include <ktoolinvocation.h>
+ #include <kglobal.h>
++#include <kmodifierkeyinfo.h> //for kmodifier keys
